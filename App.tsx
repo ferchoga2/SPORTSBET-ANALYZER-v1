@@ -1,3 +1,18 @@
+const envApiKey = import.meta.env.VITE_GEMINI_API_KEY || '';
+
+// Y en el useEffect, agrega:
+useEffect(() => {
+  const storedKey = localStorage.getItem('gemini_api_key');
+  if (storedKey) setApiKey(storedKey);
+  else if (envApiKey) {
+    setApiKey(envApiKey);
+    localStorage.setItem('gemini_api_key', envApiKey);
+  }
+  else setShowApiKeyModal(true);
+  
+  // ... resto del código
+}, []);
+
 import React, { useState, useEffect, useRef } from 'react';
 import { 
   Activity, 
@@ -280,7 +295,7 @@ function App() {
                 onChange={(e) => setApiKey(e.target.value)}
                 placeholder="Pegar API Key aquí..."
                 className="w-full bg-slate-900 border border-slate-700 rounded-lg px-4 py-3 text-white focus:ring-2 focus:ring-sports-blue focus:border-transparent outline-none mb-4"
-              />
+              />          
               <div className="flex justify-end gap-2">
                 {apiKey && (
                   <button 
