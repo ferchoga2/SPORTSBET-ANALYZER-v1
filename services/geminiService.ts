@@ -1,8 +1,6 @@
-const API_KEY = import.meta.env.VITE_GEMINI_API_KEY || '';
-import { GoogleGenAI } from "@google/genai";
 import { MatchAnalysis } from "../types";
 
-const SYSTEM_INSTRUCTION = `
+const SYSTEM_PROMPT = `
 # ROLE
 Eres un analista experto en apuestas deportivas de nivel profesional.
 
@@ -88,75 +86,65 @@ Estructura requerida para cada partido:
 }
 `;
 
-export const analyzeUrls = async (urls: string[], apiKey: string, transcription?: string): Promise<MatchAnalysis[]> => {
-  if (!apiKey) throw new Error("API Key is required");
-  if (urls.length === 0 && !transcription) throw new Error("No URLs provided");
+export async function analyzeUrls(
+  urls: string[],
+  apiKey: string,
+  transcription: string = ''
+): Promise<MatchAnalysis[]> {
+  if (!apiKey) throw new Error("API Key requerida");
+  if (urls.length === 0 && !transcription) throw new Error("Agrega URLs o transcripción");
 
-  const ai = new GoogleGenAI({ apiKey });
-
-  // Filter out empty lines
-  const cleanUrls = urls.filter(u => u.trim().length > 0).join('\n');
+  let userMessage = `Analiza estas URLs de Fox Sports y genera predicciones deportivas profesionales en JSON:\n\n`;
+  userMessage += urls.map((url, i) => `${i + 1}. ${url}`).join('\n');
   
-  let prompt = `
-    Analiza la siguiente información de deportes.
-    
-    1. URLs a investigar (Usa Google Search para obtener datos actualizados):
-    ${cleanUrls}
-  `;
-
-  if (transcription && transcription.trim().length > 0) {
-    prompt += `
-    
-    2. TRANSCRIPCIÓN DE VIDEO (YouTube):
-    Usa el siguiente texto como fuente directa para las opiniones de expertos de YouTube. Extrae nombres de analistas y argumentos de aquí:
-    
-    """
-    ${transcription}
-    """
-    `;
+  if (transcription.trim()) {
+    userMessage += `\n\nTRANSCRIPCION DE YOUTUBE (procesa como fuente adicional):\n${transcription}`;
   }
-
-  prompt += `
-    Genera el JSON con el análisis detallado de cada partido identificado en las fuentes anteriores.
-    Si no encuentras información en las URLs, indícalo en el campo de "factores_riesgo" o "razonamiento".
-  `;
 
   try {
-    const response = await ai.models.generateContent({
-      model: 'gemini-3-pro-preview', // Strong reasoning model
-      contents: prompt,
-      config: {
-        systemInstruction: SYSTEM_INSTRUCTION,
-        tools: [{ googleSearch: {} }], // Enable grounding to read the URLs
-        // Note: responseMimeType: 'application/json' is NOT compatible with tools in some versions,
-        // so we rely on the prompt to enforce JSON structure and parse it manually.
+    const response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          system: [{ text: SYSTEM_PROMPT }],
+          contents: [{
+            role: 'user',
+            parts: [{ text: userMessage }],
+          }],
+          generationConfig: {
+            temperature: 0.7,
+            maxOutputTokens: 8000,
+          },
+        }),
       }
-    });
+    );
 
-    const text = response.text;
-    if (!text) throw new Error("No response from Gemini");
-
-    // Extract JSON from Markdown code blocks if present
-    let jsonStr = text;
-    const jsonMatch = text.match(/```json\n([\s\S]*?)\n```/) || text.match(/```([\s\S]*?)```/);
-    if (jsonMatch) {
-      jsonStr = jsonMatch[1];
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.error?.message || `Error: ${response.statusText}`);
     }
 
-    try {
-      const parsed: MatchAnalysis[] = JSON.parse(jsonStr);
-      if (!Array.isArray(parsed)) {
-          // If single object, wrap in array
-          return [parsed as unknown as MatchAnalysis];
-      }
-      return parsed;
-    } catch (e) {
-      console.error("Failed to parse JSON", jsonStr);
-      throw new Error("El modelo generó una respuesta que no es JSON válido. Intenta nuevamente.");
+    const data = await response.json();
+    const content = data.candidates?.[0]?.content?.parts?.[0]?.text;
+
+    if (!content) throw new Error('Sin respuesta de Gemini');
+
+    let jsonStr = content
+      .replace(/```json\n?/g, '')
+      .replace(/\n?```/g, '')
+      .trim();
+
+    const parsed = JSON.parse(jsonStr);
+
+    if (!parsed.partidos) {
+      return [parsed as unknown as MatchAnalysis];
     }
 
-  } catch (error: any) {
-    console.error("Gemini API Error:", error);
-    throw new Error(error.message || "Error processing request with Gemini");
+    return parsed.partidos as MatchAnalysis[];
+  } catch (error) {
+    console.error(error);
+    throw error;
   }
-};
+}
