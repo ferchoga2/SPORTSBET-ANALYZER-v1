@@ -1,0 +1,5 @@
+{
+  "name": "SportsBet Pro Analyzer v2",
+  "description": "Professional sports analysis tool using Gemini 3 Pro to process URLs and generate detailed betting insights.",
+  "requestFramePermissions": []
+}
